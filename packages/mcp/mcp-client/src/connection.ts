@@ -15,7 +15,7 @@
  * @module
  */
 
-import { Client } from '@modelcontextprotocol/client'
+import { Client, SdkHttpError, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import type { Context } from '@deepseek-ai/cordis'
 import { assertNever, deepEqualJson, type JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { ServerContext } from './server-context.ts'
@@ -291,6 +291,14 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
     status.update({ state: 'connecting', attempt: failedAttempts })
     client.onclose = () => {
       if (record.connectedAt !== undefined) lost(record, 'connection closed')
+    }
+    client.onerror = (error) => {
+      const transport = client.transport
+      // Session rejection is a request error, so the SDK does not emit onclose.
+      if (record.connectedAt !== undefined && error instanceof SdkHttpError && error.status === 404
+        && transport instanceof StreamableHTTPClientTransport && transport.sessionId !== undefined) {
+        lost(record, 'MCP session expired; reconnecting without replaying requests')
+      }
     }
     async function refreshTools(): Promise<void> {
       if (!isCurrent(record)) return
